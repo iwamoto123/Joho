@@ -202,8 +202,25 @@
   function syncTrayHeight() {
     const h = tray.hidden ? 0 : Math.ceil(tray.getBoundingClientRect().height);
     document.documentElement.style.setProperty('--trayh', h + 'px');
+    syncTrayScroll();
   }
   window.addEventListener('resize', syncTrayHeight);
+
+  /**
+   * 選択肢が全部見えていてスクロールの必要がないときは「触ってすぐドラッグ」、
+   * はみ出してスクロールが要るときだけ「上下スワイプ＝スクロール／長押し＝ドラッグ」に切り替える。
+   */
+  let trayScrolls = false;
+  function syncTrayScroll() {
+    trayScrolls = chipsEl.scrollHeight > chipsEl.clientHeight + 2;
+    chipsEl.classList.toggle('scrollable', trayScrolls);
+    const tip = $('#traytip');
+    if (tip) {
+      tip.textContent = trayScrolls
+        ? 'タップして選ぶ → 空欄をタップ（長押しでドラッグ）'
+        : 'ドラッグして空欄へ／タップして選んでもOK';
+    }
+  }
 
   $('#traytoggle').onclick = () => {
     tray.classList.toggle('collapsed');
@@ -250,15 +267,18 @@
   }
 
   function startPress(text, fromSlot, ev, srcEl) {
+    // 選択肢がスクロールしないなら（＝全部見えているなら）どの向きでもすぐドラッグできる。
+    // 空欄からつまみ出すときも同じ。
+    const instant = !!fromSlot || !trayScrolls;
     drag = {
-      text, fromSlot, srcEl,
+      text, fromSlot, srcEl, instant,
       armed: false, cancelled: false,
       startX: ev.clientX, startY: ev.clientY,
       pointerType: ev.pointerType || 'mouse',
       ghost: null, timer: null
     };
     if (srcEl) srcEl.classList.add('pressing');
-    if (drag.pointerType !== 'mouse') {
+    if (drag.pointerType !== 'mouse' && !instant) {
       drag.timer = setTimeout(() => armDrag(drag.startX, drag.startY), 200);
     }
     document.addEventListener('pointermove', onMove, { passive: false });
@@ -290,12 +310,13 @@
     const dist = Math.hypot(dx, dy);
 
     if (!drag.armed) {
-      if (dist < 8) return;
-      // マウスはすぐドラッグ。指は横方向の動きならドラッグ、縦ならスクロールに譲る
-      if (drag.pointerType === 'mouse' || Math.abs(dx) > Math.abs(dy) * 1.2) {
+      if (dist < 6) return;
+      // すぐドラッグしてよい場面（マウス／スクロール不要な選択肢／空欄からつまみ出す）
+      if (drag.instant || drag.pointerType === 'mouse' || Math.abs(dx) > Math.abs(dy) * 1.2) {
         clearTimeout(drag.timer);
         armDrag(ev.clientX, ev.clientY);
       } else {
+        // スクロールが要るリストで縦に動かしたときは、スクロールに譲る
         clearTimeout(drag.timer);
         drag.cancelled = true;
         return;
@@ -350,9 +371,8 @@
     if (slot) {
       State.filled[slot.dataset.blank] = d.text;
       if (d.fromSlot && d.fromSlot !== slot.dataset.blank) delete State.filled[d.fromSlot];
-    } else if (d.fromSlot) {
-      delete State.filled[d.fromSlot];
     }
+    // 空欄の外で指を離しても中身は消さない（消したいときは空欄をタップする）
     clearSelection();
     refreshSlots();
     clearJudge();

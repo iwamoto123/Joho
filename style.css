@@ -121,6 +121,7 @@ table.data td:first-child, table.data th:first-child { background: #f8fafc; font
   background: #33445a; border: 2px dashed #7a90ab; border-radius: 4px;
   color: #cfe0f2; text-align: center; cursor: pointer;
   vertical-align: baseline; font-family: var(--mono);
+  touch-action: none;   /* 空欄からつまみ出すのもすぐできるように */
 }
 .slot .ph { color: #93a7bd; font-size: 12px; }
 .slot.filled { background: #1f5f92; border: 2px solid #6fb2e8; color: #fff; }
@@ -168,10 +169,12 @@ table.data td:first-child, table.data th:first-child { background: #f8fafc; font
   padding: 7px 13px 7px 7px; border-radius: 6px;
   background: #fff; border: 1.5px solid #a9cde8; color: var(--pri-d);
   cursor: grab; white-space: nowrap;
-  touch-action: pan-y;                 /* 上下スワイプはスクロールに譲る */
   box-shadow: 0 1px 0 rgba(0,0,0,.05);
   transition: transform .12s, background .12s;
+  touch-action: none;                  /* 全部見えているとき＝触ってすぐドラッグ */
 }
+/* はみ出してスクロールが必要なときだけ、上下スワイプをスクロールに譲る */
+.chips.scrollable .chip { touch-action: pan-y; }
 /* 長押ししたときに文字選択・コピーメニュー・虫めがねが出ないようにする */
 .chip, .slot, .trayhead, .ghost {
   -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none; user-select: none;
@@ -337,7 +340,7 @@ textarea.code { font-family: var(--mono); font-size: 13.5px; line-height: 1.8; }
   .trayhead { padding: 7px 12px; gap: 8px; }
   .traytitle { font-size: 12.5px; padding: 1px 8px; }
   .traytip { font-size: 11px; }
-  .chips { padding: 10px 12px 12px; max-height: 32vh; gap: 7px; }
+  .chips { padding: 10px 12px 12px; max-height: 42vh; gap: 7px; }
   .chip { padding: 9px 12px 9px 7px; font-size: 13.5px; }
   .chip .cnum { min-width: 24px; height: 22px; line-height: 22px; }
 
