@@ -110,8 +110,10 @@
               <input type="range" id="speed" min="500" max="3200" step="100" value="1500">
               <span class="pos" id="pos">- / -</span>
             </div>
+            <div class="pbar"><i id="pfill"></i></div>
             <div class="narration" id="narr"><span class="muted">「動きを見る」を押すと、ここに今どの行で何が起きているかが出ます。</span></div>
-            <h3>変数と配列のようす</h3>
+            <h3>変数と配列のようす
+              <span class="legend"><i class="lg src"></i>読んだ場所 <i class="lg dst"></i>変わった場所</span></h3>
             <div class="vars" id="vars"><span class="muted">まだ実行していません</span></div>
             <h3>表示（出力）</h3>
             <div class="console" id="console"><span class="ph">（まだ何も表示されていません）</span></div>
@@ -466,6 +468,11 @@
   function updatePos() {
     const p = $('#pos');
     if (p) p.textContent = `${Math.max(0, State.anim.i + 1)} / ${State.anim.steps.length}`;
+    const f = $('#pfill');
+    if (f) {
+      const n = State.anim.steps.length;
+      f.style.width = n ? (Math.max(0, State.anim.i + 1) / n * 100) + '%' : '0%';
+    }
   }
 
   const isPhone = () => window.matchMedia('(max-width: 980px)').matches;
@@ -496,6 +503,7 @@
     State.anim.playing = false;
     clearTimeout(State.anim.timer);
     State.anim.steps = []; State.anim.i = -1; State.anim.error = null;
+    clearFx();
   }
   function finish() {
     pause();
@@ -513,9 +521,38 @@
     assign: '代入', cond: '条件', loop: '繰り返し', loopiter: '繰り返し',
     loopend: '繰り返し終了', output: '表示', expr: '実行'
   };
+  const KIND_CLS = {
+    assign: 'k-assign', cond: 'k-cond', loop: 'k-loop', loopiter: 'k-loop',
+    loopend: 'k-loop', output: 'k-out', expr: 'k-assign'
+  };
+
+  const fmtV = (v) => window.DNCL.fmt(v);
+  const reducedMotion = () => window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /** 行内バッジと飛んでいる値トークンを消す（ステップ切り替え時） */
+  function clearFx() {
+    document.querySelectorAll('.lbadge').forEach(x => x.remove());
+    document.querySelectorAll('.fly').forEach(x => x.remove());
+  }
+
+  function targetLabel(t) {
+    return t.index != null ? `${t.name}[${fmtV(t.index)}]` : t.name;
+  }
+
+  /** 代入先の「直前の値」を前のステップのスナップショットから引く */
+  function prevValOf(st, prev) {
+    if (!prev || !st.target) return undefined;
+    const v = prev.vars[st.target.name];
+    if (st.target.index != null) {
+      if (!Array.isArray(v)) return undefined;
+      return v[st.target.index - (State.prob.indexBase || 0)];
+    }
+    return v;
+  }
 
   function goStep(i) {
     const steps = State.anim.steps;
+    clearFx();
     if (i < 0) {
       State.anim.i = -1;
       document.querySelectorAll('.cl.active').forEach(x => x.classList.remove('active'));
@@ -537,10 +574,100 @@
       el.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
     }
 
-    narrate(`<span class="badge">${KIND_LABEL[st.kind] || ''}</span>${esc(st.desc)}`);
-    renderVars(st.vars, prev ? prev.vars : null);
-    renderConsole(st.output);
+    narrateStep(st, prev);
+    renderVars(st.vars, prev ? prev.vars : null, st);
+    renderConsole(st.output, st.kind === 'output');
+    const badge = addLineBadge(st, el);
+    runFx(st, badge);
     updatePos();
+  }
+
+  /** ナレーション（種別バッジ＋説明＋「変数: 前 → 後」の変化チップ） */
+  function narrateStep(st, prev) {
+    let extra = '';
+    if (st.kind === 'assign' && st.target) {
+      const pv = prevValOf(st, prev);
+      const showOld = pv !== undefined && !sameVal(pv, st.value);
+      extra = `<div class="ndiff"><span class="dn">${esc(targetLabel(st.target))}</span>` +
+        (showOld ? `<span class="old">${esc(fmtV(pv))}</span><span class="ar">→</span>` : '') +
+        `<span class="new">${esc(fmtV(st.value))}</span></div>`;
+    } else if (typeof st.result === 'boolean') {
+      extra = `<div class="ndiff"><span class="verdict ${st.result ? 'v-ok' : 'v-ng'}">` +
+        `${st.result ? '○ 成り立つ（真）' : '× 成り立たない（偽）'}</span></div>`;
+    }
+    narrate(`<span class="badge ${KIND_CLS[st.kind] || ''}">${KIND_LABEL[st.kind] || ''}</span>${esc(st.desc)}${extra}`);
+  }
+
+  /** 実行中の行の右端に「結果」を直接出す（total ← 50 ／ ○真 ／ i = 2 など） */
+  function addLineBadge(st, lineEl) {
+    if (!lineEl) return null;
+    const ct = lineEl.querySelector('.ct');
+    if (!ct) return null;
+    let cls = null, txt = '';
+    if (st.kind === 'assign') {
+      cls = 'b-assign';
+      txt = st.target ? `${targetLabel(st.target)} ← ${fmtV(st.value)}` : '代入';
+    } else if (typeof st.result === 'boolean') {
+      cls = st.result ? 'b-true' : 'b-false';
+      txt = st.result ? '○ 真' : '× 偽';
+    } else if ((st.kind === 'loop' || st.kind === 'loopiter') && st.loopVar) {
+      cls = 'b-loop';
+      txt = `${st.loopVar.name} = ${fmtV(st.loopVar.value)}`;
+    } else if (st.kind === 'loopend') {
+      cls = 'b-false';
+      txt = 'おわり';
+    } else if (st.kind === 'output') {
+      cls = 'b-out';
+      txt = '表示 ▶';
+    }
+    if (!cls) return null;
+    const b = document.createElement('span');
+    b.className = 'lbadge ' + cls;
+    b.textContent = txt;
+    ct.appendChild(b);
+    return b;
+  }
+
+  /** 値トークンを実行行から代入先（変数・配列セル・出力欄）へ飛ばす */
+  function runFx(st, badgeEl) {
+    if (reducedMotion() || !badgeEl) return;
+    if (st.kind === 'assign' && st.target) {
+      const base = State.prob.indexBase || 0;
+      const key = st.target.index != null
+        ? `arr-${st.target.name}-${st.target.index - base}`
+        : `v-${st.target.name}`;
+      flyToken(fmtV(st.value), badgeEl, document.querySelector(`#vars [data-hit="${key}"]`));
+    } else if (st.kind === 'output') {
+      const t = String(st.text == null ? '' : st.text);
+      flyToken(t.length > 14 ? t.slice(0, 14) + '…' : t, badgeEl, $('#console'));
+    }
+  }
+
+  function inViewport(r) {
+    return r.bottom > 0 && r.top < window.innerHeight && r.right > 0 && r.left < window.innerWidth;
+  }
+
+  function flyToken(text, fromEl, toEl) {
+    if (!fromEl || !toEl || !toEl.animate) return;
+    const a = fromEl.getBoundingClientRect();
+    const b = toEl.getBoundingClientRect();
+    if (!inViewport(a) || !inViewport(b)) return;
+    const t = document.createElement('div');
+    t.className = 'fly';
+    t.textContent = text;
+    const x0 = a.left + a.width / 2, y0 = a.top + a.height / 2;
+    t.style.left = x0 + 'px';
+    t.style.top = y0 + 'px';
+    document.body.appendChild(t);
+    const dx = (b.left + b.width / 2) - x0;
+    const dy = (b.top + b.height / 2) - y0;
+    const dur = Math.max(260, Math.min(650, State.anim.speed * 0.38));
+    const anim = t.animate([
+      { transform: 'translate(-50%, -50%) scale(1)', opacity: 1 },
+      { transform: `translate(calc(-50% + ${dx}px), calc(-50% + ${dy}px)) scale(.85)`, opacity: .9 }
+    ], { duration: dur, easing: 'cubic-bezier(.3,.7,.35,1)' });
+    anim.onfinish = () => t.remove();
+    anim.oncancel = () => t.remove();
   }
 
   function sameVal(a, b) {
@@ -548,39 +675,61 @@
     return a === b;
   }
 
-  function renderVars(vars, prev) {
+  function renderVars(vars, prev, st) {
     const box = $('#vars');
     const names = Object.keys(vars);
     if (!names.length) { box.innerHTML = '<span class="muted">まだ変数はありません</span>'; return; }
 
-    // カーソル用: i,j,k,m,n のような添字変数
-    const cursors = {};
-    for (const n of names) if (['i', 'j', 'k', 'm', 'n'].includes(n) && Number.isInteger(vars[n])) cursors[n] = vars[n];
-    const cursorVal = Object.values(cursors)[0];
+    const base = (State.prob.indexBase || 0);
+
+    // このステップで「読んだ場所」（青く塗る）
+    const srcKeys = new Set();
+    if (st && st.reads) {
+      for (const r of st.reads) {
+        srcKeys.add(r.index != null ? `arr-${r.name}-${r.index - base}` : `v-${r.name}`);
+      }
+    }
+
+    // 配列のカーソル: 実行中のループ変数を優先。無ければ i,j,k,m,n の類推
+    let cursorName = (st && st.loopVar) ? st.loopVar.name : null;
+    if (!cursorName) {
+      for (const n of names) {
+        if (['i', 'j', 'k', 'm', 'n'].includes(n) && Number.isInteger(vars[n])) { cursorName = n; break; }
+      }
+    }
+    const cursorVal = (cursorName && Number.isInteger(vars[cursorName])) ? vars[cursorName] : undefined;
 
     const hits = [];
     box.innerHTML = names.map(name => {
       const v = vars[name];
       const before = prev ? prev[name] : undefined;
       if (Array.isArray(v)) {
-        const base = (State.prob.indexBase || 0);
         const cells = v.map((x, k) => {
+          const key = `arr-${name}-${k}`;
           const changed = prev && Array.isArray(before) && before[k] !== x;
           const isCursor = (cursorVal !== undefined) && (base + k === cursorVal);
-          if (changed) hits.push(`arr-${name}-${k}`);
+          if (changed) hits.push(key);
+          const cls = ['cell'];
+          if (isCursor) cls.push('cursor');
+          if (srcKeys.has(key)) cls.push('src');
           return `<div class="cellwrap"><span class="ix">${base + k}</span>
-            <div class="cell${isCursor ? ' cursor' : ''}" data-hit="arr-${name}-${k}">${esc(window.DNCL.fmt(x))}</div></div>`;
+            <div class="${cls.join(' ')}" data-hit="${key}">${esc(window.DNCL.fmt(x))}</div>
+            ${isCursor ? `<span class="curlabel">▲ ${esc(cursorName)}</span>` : ''}</div>`;
         }).join('');
         return `<div class="vrow"><span class="vname">${esc(name)}</span><div class="arr">${cells}</div></div>`;
       }
       const changed = prev && !sameVal(before, v);
       if (changed || (prev && before === undefined)) hits.push('v-' + name);
+      const cls = 'vval' + (srcKeys.has('v-' + name) ? ' src' : '');
       return `<div class="vrow"><span class="vname">${esc(name)}</span>
-        <span class="vval" data-hit="v-${esc(name)}">${esc(window.DNCL.fmt(v))}</span></div>`;
+        <span class="${cls}" data-hit="v-${esc(name)}">${esc(window.DNCL.fmt(v))}</span></div>`;
     }).join('');
 
+    // ステップを速く進めたとき、前のステップのハイライト予約が
+    // 今の表示に重ならないよう、古い予約は取り消す
+    cancelAnimationFrame(renderVars._raf || 0);
     if (hits.length) {
-      requestAnimationFrame(() => {
+      renderVars._raf = requestAnimationFrame(() => {
         hits.forEach(h => {
           const el = box.querySelector(`[data-hit="${h}"]`);
           if (el) {
@@ -592,10 +741,12 @@
     }
   }
 
-  function renderConsole(lines) {
+  function renderConsole(lines, flashLast) {
     const c = $('#console');
     if (!lines || !lines.length) { c.innerHTML = '<span class="ph">（まだ何も表示されていません）</span>'; return; }
-    c.textContent = lines.join('\n');
+    c.innerHTML = lines.map((l, i) =>
+      `<div class="cline${flashLast && i === lines.length - 1 ? ' new' : ''}">${esc(l)}</div>`
+    ).join('');
     c.scrollTop = c.scrollHeight;
   }
 

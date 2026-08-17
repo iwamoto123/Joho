@@ -275,6 +275,92 @@ button.icon { padding: 7px 12px; font-size: 15px; }
   min-height: 64px; max-height: 190px; overflow-y: auto; white-space: pre-wrap;
 }
 .console .ph { color: #5b6b7a; }
+.console .cline.new { animation: consin .5s ease-out; }
+@keyframes consin {
+  from { background: rgba(185, 245, 201, .4); color: #fff; }
+}
+
+/* ---------- アニメーション演出 ---------- */
+/* デスクトップでは実行パネルを追従させ、常に視界に入れる */
+@media (min-width: 981px) {
+  #animpanel { position: sticky; top: 58px; }
+}
+
+/* 進捗バー */
+.pbar { height: 4px; background: #e2e8f0; border-radius: 2px; margin-bottom: 10px; overflow: hidden; }
+.pbar i { display: block; height: 100%; width: 0; background: var(--acc); transition: width .25s ease-out; }
+
+/* 実行中の行の右端に出る結果バッジ（total ← 50 ／ ○真 ／ i = 2） */
+.lbadge {
+  display: inline-block; margin-left: 12px; padding: 0 9px;
+  border-radius: 4px; font-family: var(--sans); font-size: 11.5px;
+  font-weight: 700; line-height: 1.8; vertical-align: 1px; white-space: nowrap;
+  animation: badgein .22s ease-out;
+}
+@keyframes badgein {
+  from { opacity: 0; transform: translateY(-5px) scale(.85); }
+}
+.lbadge.b-assign { background: var(--acc); color: #fff; }
+.lbadge.b-true { background: var(--ok); color: #fff; }
+.lbadge.b-false { background: #5b6b7a; color: #fff; }
+.lbadge.b-loop { background: var(--pri); color: #fff; }
+.lbadge.b-out { background: #101820; color: #b9f5c9; border: 1px solid #2b3746; }
+
+/* 実行行から代入先へ飛ぶ値トークン */
+.fly {
+  position: fixed; z-index: 90; pointer-events: none;
+  font-family: var(--mono); font-size: 13px; font-weight: 700;
+  background: var(--acc); color: #fff;
+  padding: 3px 11px; border-radius: 13px;
+  box-shadow: 0 4px 14px rgba(223, 141, 51, .5);
+  transform: translate(-50%, -50%);
+  max-width: 60vw; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* 変数パネルの「読んだ場所」（青） 。「変わった場所」はオレンジの .hit */
+.cell.src { background: var(--pri-l); border-color: var(--pri); }
+.vval.src { background: var(--pri-l); border-color: var(--pri); }
+
+/* 凡例 */
+.legend { font-weight: 400; font-size: 11px; color: var(--muted); margin-left: 6px; }
+.legend .lg {
+  display: inline-block; width: 10px; height: 10px; border-radius: 2px;
+  margin: 0 3px 0 8px; vertical-align: -1px;
+}
+.legend .lg.src { background: var(--pri-l); border: 1px solid var(--pri); }
+.legend .lg.dst { background: var(--acc); }
+
+/* 配列カーソルの名前ラベル（セルの下に ▲ i と出す） */
+.cellwrap { position: relative; }
+.arr { padding-bottom: 15px; }
+.curlabel {
+  position: absolute; top: 100%; left: 50%; transform: translateX(-50%);
+  font-family: var(--mono); font-size: 10.5px; font-weight: 700;
+  color: var(--pri-d); white-space: nowrap; line-height: 1.4;
+}
+
+/* ナレーションの種別バッジ色分けと変化チップ */
+.narration .badge.k-assign { background: var(--acc); }
+.narration .badge.k-cond { background: var(--pri); }
+.narration .badge.k-loop { background: var(--pri-d); }
+.narration .badge.k-out { background: #101820; }
+.ndiff {
+  margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  font-family: var(--mono); font-size: 14.5px;
+}
+.ndiff .dn { font-weight: 700; color: var(--pri-d); }
+.ndiff .old { color: var(--muted); text-decoration: line-through; }
+.ndiff .ar { color: var(--muted); }
+.ndiff .new { font-weight: 700; background: var(--acc); color: #fff; border-radius: 4px; padding: 0 9px; }
+.verdict { font-family: var(--sans); font-weight: 700; font-size: 13px; padding: 1px 10px; border-radius: 4px; }
+.verdict.v-ok { background: var(--ok-l); color: var(--ok); border: 1px solid var(--ok); }
+.verdict.v-ng { background: #f1f5f9; color: #64748b; border: 1px solid #cbd5e1; }
+
+@media (prefers-reduced-motion: reduce) {
+  .lbadge { animation: none; }
+  .fly { display: none; }
+  .console .cline.new { animation: none; }
+}
 
 /* ---------- misc ---------- */
 .muted { color: var(--muted); font-size: 13px; }

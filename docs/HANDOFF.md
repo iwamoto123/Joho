@@ -72,8 +72,8 @@ JS/CSSは **1年間ブラウザにキャッシュされる**設定（`Cache-Cont
 `index.html` と `teacher.html` の中で
 
 ```html
-<link rel="stylesheet" href="style.css?v=6">
-<script src="app.js?v=6"></script>
+<link rel="stylesheet" href="style.css?v=7">
+<script src="app.js?v=7"></script>
 ```
 
 のように参照しているので、**JSかCSSを変更したら `?v=` の数字を全部+1して上げないと、
@@ -81,7 +81,7 @@ JS/CSSは **1年間ブラウザにキャッシュされる**設定（`Cache-Cont
 数字を上げれば必ず反映される。
 
 ```bash
-perl -pi -e 's/\?v=6/?v=7/g' index.html teacher.html
+perl -pi -e 's/\?v=7/?v=8/g' index.html teacher.html
 ```
 
 ### git push では本番が変わらない
@@ -178,7 +178,14 @@ reference/          公式PDF・試作問題・自作講座資料（.gitignore�
   kind,             // assign / cond / loop / loopiter / loopend / output / expr
   desc,             // 「min_tensuu = 1000 > 50 を計算して、min_tensuu は 50 になりました」
   vars,             // その時点の全変数のスナップショット（配列はコピー）
-  output            // その時点までの表示内容
+  output,           // その時点までの表示内容
+  // ▼ アニメーション演出用の構造化データ（種別により付く）
+  target,           // assign: 代入先 { name, index }（index は表示上の添字。スカラーは null）
+  value,            // assign: 代入した値
+  reads,            // assign/cond/output: 読んだ場所 [{ name, index }]（配列全体の読みは含めない）
+  result,           // cond / while系: 条件の真偽
+  loopVar,          // for系: { name, value } 実行中のループ変数
+  text              // output: 表示した文字列
 }
 ```
 
@@ -205,7 +212,23 @@ CSSの `touch-action` もこのクラスで `none` ⇄ `pan-y` を切り替え�
 
 **アニメーションパネル**は、スマホでは `body.anim-open` のとき画面下から
 せり出す（`position: fixed`）。上半分にコード、下半分に変数の値が同時に見えるようにするため。
-デスクトップでは右カラムに普通に並ぶ。
+デスクトップでは右カラムに並び、`position: sticky` でスクロールに追従する。
+
+**アニメーションの演出**（2026-08-17に作り直し。文章を読まなくても「パッと見」でわかるように）:
+
+- **行内バッジ** `.lbadge`: 実行中の行の右端に結果を直接出す。
+  代入は `total ← 50`（オレンジ）、条件は `○ 真`（緑）/`× 偽`（グレー）、
+  ループは `i = 2`（青）、表示は `表示 ▶`。視線がコードから動かなくても結果がわかる
+- **飛ぶ値トークン** `.fly`: 代入・表示のステップで、値が実行行から
+  変数ボックス・配列セル・出力欄へ飛ぶ（Web Animations API。`prefers-reduced-motion` では出さない）
+- **読み書きの色分け**: そのステップで読んだ変数・セルは青（`.src`）、
+  変わった場所はオレンジのフラッシュ（`.hit`）。凡例を「変数と配列のようす」見出しに表示
+- **配列カーソル**: 実行中のループ変数の位置に `▲ i` のラベルをセルの下に出す
+  （`step.loopVar` を優先。無ければ i,j,k,m,n の類推）
+- **変化チップ**: ナレーション欄に `total: 0 → 50` を大きく出す。条件は `○ 成り立つ（真）` の判定チップ
+- **進捗バー** `.pbar`: 全ステップ中どこまで来たかを表示
+- これらの素材は dncl.js のステップイベント（§6.3 の target / reads / result / loopVar / text）から作る。
+  ステップ連打時の残像対策として、renderVars は前回の requestAnimationFrame 予約を取り消してから光らせる
 
 ---
 

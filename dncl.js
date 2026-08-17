@@ -443,6 +443,10 @@
     let stepCount = 0;
     const MAX_STEPS = opts.maxSteps || 4000;
 
+    // 「式がどの変数・配列要素を読んだか」の記録。
+    // アニメーション側で参照元を光らせるために使う。記録したい区間だけ配列にする。
+    let reads = null;
+
     function getVar(name, line) {
       if (!env.vars.has(name)) {
         throw new DnclError(`変数 ${name} にはまだ値が入っていません`, line);
@@ -475,12 +479,16 @@
         }
         case 'var': {
           if (!env.vars.has(n.name)) throw new DnclError(`変数 ${n.name} にはまだ値が入っていません`, line);
-          return env.vars.get(n.name);
+          const v = env.vars.get(n.name);
+          if (reads && !Array.isArray(v)) reads.push({ name: n.name, index: null });
+          return v;
         }
         case 'index': {
           if (!env.vars.has(n.name)) throw new DnclError(`配列 ${n.name} はまだ作られていません`, line);
           const i = ev(n.idx[0], line);
-          return env.vars.get(n.name)[realIndex(n.name, i, line)];
+          const k = realIndex(n.name, i, line);
+          if (reads) reads.push({ name: n.name, index: i });
+          return env.vars.get(n.name)[k];
         }
         case 'call': {
           const args = n.args.map(a => ev(a, line));
@@ -528,6 +536,15 @@
 
     /** 式を「値を当てはめた形」に描き直す（例: goukei + Seiseki[i] → 0 + 50） */
     function trace(n, line) {
+      const saved = reads;
+      reads = null;   // 描き直しのための再評価は「読んだ」に数えない
+      try {
+        return trace_(n, line);
+      } finally {
+        reads = saved;
+      }
+    }
+    function trace_(n, line) {
       try {
         switch (n.type) {
           case 'num': return fmt(n.v);
@@ -548,6 +565,18 @@
     }
 
     function ev_(n, line) { return ev(n, line); }
+
+    /** fn を実行し、その間に読んだ変数・配列要素を { value, reads } で返す */
+    function capture(fn) {
+      const saved = reads;
+      reads = [];
+      try {
+        const value = fn();
+        return { value, reads };
+      } finally {
+        reads = saved;
+      }
+    }
 
     function step(line, kind, desc, extra) {
       stepCount++;
@@ -571,31 +600,36 @@
           for (const it of st.items) {
             if (it.kind === 'assign') {
               const shown = trace(it.expr, st.line);
-              const val = ev_(it.expr, st.line);
-              let label;
+              const cap = capture(() => ev_(it.expr, st.line));
+              const val = cap.value;
+              let label, target;
               if (it.target.type === 'var') {
                 env.vars.set(it.target.name, val);
                 label = it.target.name;
+                target = { name: it.target.name, index: null };
               } else {
                 const name = it.target.name;
                 if (!env.vars.has(name)) throw new DnclError(`配列 ${name} はまだ作られていません`, st.line);
-                const i = ev_(it.target.idx[0], st.line);
+                const icap = capture(() => ev_(it.target.idx[0], st.line));
+                const i = icap.value;
+                cap.reads.push(...icap.reads);
                 const k = realIndex(name, i, st.line);
                 env.vars.get(name)[k] = val;
                 label = `${name}[${fmt(i)}]`;
+                target = { name, index: i };
               }
               const same = (shown === fmt(val));
               yield step(st.line, 'assign',
                 same ? `${label} に ${fmt(val)} を代入しました`
                      : `${label} = ${shown} を計算して、${label} は ${fmt(val)} になりました`,
-                { changed: it.target.type === 'var' ? [it.target.name] : [it.target.name], value: val });
+                { changed: [it.target.name], value: val, target, reads: cap.reads });
             } else {
               const e = it.expr;
               if (e.type === 'call' && e.name === '表示する') {
-                const parts = e.args.map(a => ev_(a, st.line));
-                const text = parts.map(v => fmt(v)).join('');
+                const cap = capture(() => e.args.map(a => ev_(a, st.line)));
+                const text = cap.value.map(v => fmt(v)).join('');
                 output.push(text);
-                yield step(st.line, 'output', `「${text}」と表示しました`, { text });
+                yield step(st.line, 'output', `「${text}」と表示しました`, { text, reads: cap.reads });
               } else {
                 const v = ev_(e, st.line);
                 yield step(st.line, 'expr', `${it.exprSrc} を実行しました`, { value: v });
@@ -617,10 +651,11 @@
         case 'if': {
           for (const br of st.branches) {
             const shown = trace(br.cond, br.line);
-            const ok = truthy(ev_(br.cond, br.line));
+            const cap = capture(() => truthy(ev_(br.cond, br.line)));
+            const ok = cap.value;
             yield step(br.line, 'cond',
               `条件「${br.condSrc}」→ ${shown} → ${ok ? '真（成り立つ）。中の処理を実行します' : '偽（成り立たない）。中の処理はとばします'}`,
-              { result: ok });
+              { result: ok, reads: cap.reads });
             if (ok) { yield* runBlock(br.body); return; }
           }
           if (st.elseBody) {
@@ -637,17 +672,19 @@
           env.vars.set(st.varName, from);
           yield step(st.line, 'loop',
             `${st.varName} に ${fmt(from)} を入れて繰り返しを始めます（${fmt(from)} から ${fmt(to)} まで ${fmt(stepV)} ずつ${st.dir > 0 ? '増やす' : '減らす'}）`,
-            { changed: [st.varName] });
+            { changed: [st.varName], loopVar: { name: st.varName, value: from } });
           let guard = 0;
           while (true) {
             const cur = env.vars.get(st.varName);
             const cont = st.dir > 0 ? cur <= to : cur >= to;
             if (!cont) {
               yield step(st.line, 'loopend',
-                `${st.varName} が ${fmt(cur)} になり、${fmt(to)} を${st.dir > 0 ? '超えた' : '下回った'}ので繰り返しを終わります`, {});
+                `${st.varName} が ${fmt(cur)} になり、${fmt(to)} を${st.dir > 0 ? '超えた' : '下回った'}ので繰り返しを終わります`,
+                { loopVar: { name: st.varName, value: cur } });
               return;
             }
-            yield step(st.line, 'loopiter', `${st.varName} = ${fmt(cur)} の回を実行します`, { changed: [st.varName] });
+            yield step(st.line, 'loopiter', `${st.varName} = ${fmt(cur)} の回を実行します`,
+              { changed: [st.varName], loopVar: { name: st.varName, value: cur } });
             yield* runBlock(st.body);
             const nv = env.vars.get(st.varName) + st.dir * stepV;
             env.vars.set(st.varName, nv);
@@ -659,10 +696,11 @@
           let guard = 0;
           while (true) {
             const shown = trace(st.cond, st.line);
-            const ok = truthy(ev_(st.cond, st.line));
+            const cap = capture(() => truthy(ev_(st.cond, st.line)));
+            const ok = cap.value;
             yield step(st.line, ok ? 'loopiter' : 'loopend',
               `条件「${st.condSrc}」→ ${shown} → ${ok ? '真。もう一度くり返します' : '偽。繰り返しを終わります'}`,
-              { result: ok });
+              { result: ok, reads: cap.reads });
             if (!ok) return;
             yield* runBlock(st.body);
             if (++guard > 100000) throw new DnclError('繰り返しが多すぎます', st.line);
