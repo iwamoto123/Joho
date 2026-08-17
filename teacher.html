@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>問題を作る｜共通テスト情報Ⅰ プログラミング演習</title>
+<link rel="stylesheet" href="style.css?v=3">
+</head>
+<body>
+
+<div class="topbar">
+  <h1>問題を作る（先生用）</h1>
+  <span class="spacer"></span>
+  <a href="index.html">生徒画面へ</a>
+</div>
+
+<div class="wrap" style="padding-bottom:40px">
+  <div class="cols">
+    <div>
+      <div class="card">
+        <h2>セットの設定</h2>
+        <div class="field">
+          <label>セット名</label>
+          <input type="text" id="setTitle" placeholder="例）配列と繰り返しの基本">
+        </div>
+        <div class="field">
+          <label>導入文（任意・HTML可）</label>
+          <textarea id="setIntro" rows="2" placeholder="このセットのねらいや前提を書きます"></textarea>
+        </div>
+        <div class="field">
+          <label>問題</label>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <select id="probSel" style="flex:1;min-width:180px"></select>
+            <button id="addProb">＋ 追加</button>
+            <button id="delProb">削除</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>問題の中身</h2>
+        <div class="field">
+          <label>タイトル</label>
+          <input type="text" id="pTitle" placeholder="例）(1) 合計点と平均点">
+        </div>
+        <div class="field">
+          <label>問題文（HTML可）</label>
+          <textarea id="pQuestion" rows="3"></textarea>
+        </div>
+        <div class="field">
+          <label>ヒント（任意）</label>
+          <textarea id="pHint" rows="2"></textarea>
+        </div>
+        <div class="field">
+          <label>プログラム</label>
+          <div class="desc">1行1文。空欄にしたいところを <code>{{1}}</code> <code>{{2}}</code> … と書きます。
+            字下げは <code>│</code> と <code>└</code>、または半角スペースでもOK。</div>
+          <textarea id="pCode" class="code" rows="12" spellcheck="false"></textarea>
+        </div>
+        <div class="field">
+          <label>配列の添字の開始</label>
+          <select id="pBase">
+            <option value="0">0 から（公式の例示・試作問題）</option>
+            <option value="1">1 から（令和7年度本試験のような形式）</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>選択肢（1行に1つ）</label>
+          <div class="desc">正解も必ず含めてください。まぎらわしい選択肢を混ぜると練習になります。</div>
+          <textarea id="pChoices" class="code" rows="8" spellcheck="false"></textarea>
+        </div>
+        <div class="field">
+          <label>空欄の正解と解説</label>
+          <div class="desc">プログラム欄の <code>{{n}}</code> を読み取って自動で並びます。</div>
+          <div id="blankEditor"></div>
+        </div>
+      </div>
+    </div>
+
+    <div>
+      <div class="card">
+        <h2>動作チェック</h2>
+        <p class="muted">正解を入れた状態でプログラムを実行し、エラーがないか・出力が意図どおりかを確認します。</p>
+        <div class="btns"><button class="primary" id="runbtn">正解のコードを実行する</button></div>
+        <div class="console" id="runout" style="margin-top:10px"><span class="ph">（未実行）</span></div>
+      </div>
+
+      <div class="card">
+        <h2>配布用URL</h2>
+        <p class="muted">生徒はログイン不要。このURLを開くだけで取り組めます。</p>
+        <div class="btns"><button class="accent" id="makeurl">URLを発行する</button></div>
+        <h3>この問題だけのURL</h3>
+        <div class="urlout" id="urlOne">—</div>
+        <div class="btns"><button id="copyOne">コピー</button><button id="openOne">開く</button></div>
+        <h3>セット全体のURL</h3>
+        <div class="urlout" id="urlSet">—</div>
+        <div class="btns"><button id="copySet">コピー</button><button id="openSet">開く</button></div>
+        <p class="muted" style="margin-top:10px">※問題データはURLの中に入っています。サーバーもデータベースも不要です。問題を直したら、URLを発行し直して配ってください。</p>
+      </div>
+
+      <div class="card">
+        <h2>保存・読み込み</h2>
+        <div class="btns">
+          <button id="exportBtn">JSONで書き出す</button>
+          <button id="importBtn">JSONを読み込む</button>
+          <button id="loadSample">見本（成績データ6問）を読み込む</button>
+        </div>
+        <textarea id="jsonArea" class="code" rows="6" placeholder="ここにJSONが入ります" style="margin-top:10px"></textarea>
+        <p class="muted">この画面の内容はブラウザに自動保存されます。</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="codec.js"></script>
+<script src="dncl.js"></script>
+<script src="problems.js"></script>
+<script src="teacher.js"></script>
+</body>
+</html>
