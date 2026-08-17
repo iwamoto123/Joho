@@ -58,13 +58,28 @@
     const idxOf = {}; blanks.forEach(b => { idxOf[b.id] = b; });
 
     let dataHtml = '';
-    if (set && set.dataTable) {
-      const dt = set.dataTable;
+    const dt = prob.dataTable || (set && set.dataTable);
+    if (dt) {
       dataHtml = '<div class="tablewrap"><table class="data"><tr>' +
         dt.head.map(h => '<th>' + esc(h) + '</th>').join('') + '</tr>' +
         dt.rows.map(r => '<tr>' + r.map(c => '<td>' + esc(c) + '</td>').join('') + '</tr>').join('') +
         '</table></div>';
     }
+
+    // 解き方のイメージ（紙芝居）
+    const conceptHtml = (prob.concept && prob.concept.length) ? `
+          <div class="card" id="conceptcard">
+            <h2>まずは「解き方」を紙芝居で</h2>
+            <div class="kami">
+              <button class="knav" id="kprev" aria-label="前のスライド">←</button>
+              <div class="kstage" id="kstage"></div>
+              <button class="knav" id="knext" aria-label="次のスライド">→</button>
+            </div>
+            <div class="kfoot">
+              <div class="kdots" id="kdots"></div>
+              <span class="kpos" id="kpos"></span>
+            </div>
+          </div>` : '';
 
     app.innerHTML = `
       ${navHref || ''}
@@ -79,7 +94,7 @@
             </div>
             <div class="hintbox" id="hintbox">${esc(prob.hint || '')}</div>
           </div>
-
+${conceptHtml}
           <div class="card">
             <h2>プログラム（空欄を埋めよう）</h2>
             <div class="codebox" id="code"></div>
@@ -104,12 +119,14 @@
             <p class="muted hide-sp" style="margin:0 0 8px">空欄を埋めてから再生すると、1行ずつ何が起きているかを追えます。</p>
             <div class="anim-ctrl">
               <button class="accent" id="playbtn">▶ アニメーション開始</button>
-              <button class="icon" id="stepbtn" title="1ステップ進む">⏭</button>
-              <button class="icon" id="resetbtn" title="最初から">⏮</button>
+              <button class="knav sm" id="backbtn" title="1ステップ戻る" aria-label="1ステップ戻る">←</button>
+              <button class="knav sm" id="stepbtn" title="1ステップ進む" aria-label="1ステップ進む">→</button>
+              <button class="knav sm" id="resetbtn" title="最初から" aria-label="最初から">⟲</button>
               <label class="muted hide-sp" style="font-size:12px">速さ</label>
               <input type="range" id="speed" min="500" max="3200" step="100" value="1500">
               <span class="pos" id="pos">- / -</span>
             </div>
+            <p class="muted" style="margin:4px 0 0;font-size:11.5px">← → で紙芝居のように1コマずつ見られます</p>
             <div class="pbar"><i id="pfill"></i></div>
             <div class="narration" id="narr"><span class="muted">「動きを見る」を押すと、ここに今どの行で何が起きているかが出ます。</span></div>
             <h3>変数と配列のようす
@@ -142,6 +159,7 @@
     };
     $('#playbtn').onclick = () => (State.anim.playing ? pause() : (State.anim.steps.length ? play() : (buildAnim(), play())));
     $('#stepbtn').onclick = () => { openDock(); if (!State.anim.steps.length) buildAnim(); pause(); goStep(State.anim.i + 1); };
+    $('#backbtn').onclick = () => { openDock(); if (!State.anim.steps.length) buildAnim(); pause(); goStep(Math.max(-1, State.anim.i - 1)); };
     $('#resetbtn').onclick = () => { pause(); if (!State.anim.steps.length) buildAnim(); goStep(-1); };
     $('#openanim').onclick = () => { openDock(); if (buildAnim()) play(); };
     $('#closeanim').onclick = () => { pause(); closeDock(); };
@@ -151,6 +169,36 @@
     State.anim.speed = toDelay($('#speed').value);
 
     if (set) $('#pager').innerHTML = pagerHtml(set, prob.id);
+    if (prob.concept && prob.concept.length) initKami(prob.concept);
+  }
+
+  /* ---------------- 解き方のイメージ（紙芝居） ---------------- */
+  function initKami(slides) {
+    let idx = 0;
+    const stage = $('#kstage'), dots = $('#kdots');
+    dots.innerHTML = slides.map((_, i) => `<i data-k="${i}"></i>`).join('');
+    function show(n, dir) {
+      idx = Math.max(0, Math.min(slides.length - 1, n));
+      const s = slides[idx];
+      stage.innerHTML = `<div class="kslide ${dir || ''}"><h4>${s.t}</h4>${s.d}</div>`;
+      dots.querySelectorAll('i').forEach((d, i) => d.classList.toggle('on', i === idx));
+      $('#kpos').textContent = `${idx + 1} / ${slides.length}`;
+      $('#kprev').disabled = idx === 0;
+      $('#knext').disabled = idx === slides.length - 1;
+    }
+    $('#kprev').onclick = () => show(idx - 1, 'from-l');
+    $('#knext').onclick = () => show(idx + 1, 'from-r');
+    dots.onclick = (e) => { const d = e.target.closest('i'); if (d) show(+d.dataset.k); };
+    // 紙芝居らしく、絵の部分のタップで次へ・スワイプで前後
+    let px = null;
+    stage.addEventListener('pointerdown', (e) => { px = e.clientX; });
+    stage.addEventListener('pointerup', (e) => {
+      if (px == null) return;
+      const dx = e.clientX - px; px = null;
+      if (dx > 40) show(idx - 1, 'from-l');
+      else show(idx + 1, 'from-r');
+    });
+    show(0);
   }
 
   /* ---------------- コード描画 ---------------- */
@@ -519,11 +567,13 @@
 
   const KIND_LABEL = {
     assign: '代入', cond: '条件', loop: '繰り返し', loopiter: '繰り返し',
-    loopend: '繰り返し終了', output: '表示', expr: '実行'
+    loopend: '繰り返し終了', output: '表示', expr: '実行',
+    funcdef: '関数定義', call: '関数呼び出し', return: '戻り値'
   };
   const KIND_CLS = {
     assign: 'k-assign', cond: 'k-cond', loop: 'k-loop', loopiter: 'k-loop',
-    loopend: 'k-loop', output: 'k-out', expr: 'k-assign'
+    loopend: 'k-loop', output: 'k-out', expr: 'k-assign',
+    funcdef: 'k-fn', call: 'k-fn', return: 'k-fn'
   };
 
   const fmtV = (v) => window.DNCL.fmt(v);
@@ -594,6 +644,8 @@
     } else if (typeof st.result === 'boolean') {
       extra = `<div class="ndiff"><span class="verdict ${st.result ? 'v-ok' : 'v-ng'}">` +
         `${st.result ? '○ 成り立つ（真）' : '× 成り立たない（偽）'}</span></div>`;
+    } else if (st.kind === 'return' && st.value != null) {
+      extra = `<div class="ndiff"><span class="dn">戻り値</span><span class="new">${esc(fmtV(st.value))}</span></div>`;
     }
     narrate(`<span class="badge ${KIND_CLS[st.kind] || ''}">${KIND_LABEL[st.kind] || ''}</span>${esc(st.desc)}${extra}`);
   }
@@ -619,6 +671,15 @@
     } else if (st.kind === 'output') {
       cls = 'b-out';
       txt = '表示 ▶';
+    } else if (st.kind === 'funcdef') {
+      cls = 'b-fn';
+      txt = '定義（まだ動かない）';
+    } else if (st.kind === 'call') {
+      cls = 'b-fn';
+      txt = '呼び出し ▶';
+    } else if (st.kind === 'return') {
+      cls = 'b-assign';
+      txt = `戻り値 ${fmtV(st.value)}`;
     }
     if (!cls) return null;
     const b = document.createElement('span');

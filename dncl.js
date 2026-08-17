@@ -266,6 +266,8 @@
   const RE_FOR = /^(.+?)\s*を\s*(.+?)\s*から\s*(.+?)\s*まで\s*(.+?)\s*ずつ\s*(増やし|減らし)ながら\s*繰り返す\s*:?\s*$/;
   const RE_WHILE = /^(.+?)\s*の\s*間\s*繰り返す\s*:?\s*$/;
   const RE_FILLALL = /^(.+?)\s*の\s*すべての\s*(値|要素)を\s*(.+?)\s*(に|を)\s*(する|代入する)\s*$/;
+  const RE_FUNCDEF = /^関数定義\s+(.+?)\s*\((.*?)\)\s*:?\s*$/;
+  const RE_RETURN = /^戻り値\s*\((.*)\)\s*$/;
 
   function parseProgram(codeLines) {
     // 行 → { depth, body, lineNo }
@@ -359,6 +361,20 @@
           i++; continue;
         }
 
+        if ((m = row.body.match(RE_FUNCDEF))) {
+          const params = m[2].trim() === '' ? [] : splitTopLevel(m[2], ',').map(s => s.trim());
+          const r = build(i + 1, depth + 1);
+          if (!r.stmts.length) throw new DnclError('関数の中身がありません（字下げして書いてください）', row.lineNo);
+          stmts.push({ type: 'funcdef', line: row.lineNo, name: m[1].trim(), params, body: r.stmts });
+          i = r.next;
+          continue;
+        }
+
+        if ((m = row.body.match(RE_RETURN))) {
+          stmts.push({ type: 'return', line: row.lineNo, exprSrc: m[1].trim(), expr: parseExpression(m[1], row.lineNo) });
+          i++; continue;
+        }
+
         if (RE_ELIF.test(row.body) || RE_ELSE.test(row.body)) {
           throw new DnclError('対応する「もし」が見つかりません', row.lineNo);
         }
@@ -443,19 +459,45 @@
     let stepCount = 0;
     const MAX_STEPS = opts.maxSteps || 4000;
 
+    // 実行ステップの記録先。関数の中の処理もこの配列に順番どおり入る
+    const steps = [];
+    function emit(s) { steps.push(s); }
+
+    // ユーザー定義関数（関数定義 名前(引数...): で登録される）
+    const funcs = new Map();
+    // 実行中の関数のローカル変数。null ならグローバルを実行中
+    let locals = null;
+    let callDepth = 0;
+
+    /** 変数名がどのスコープにあるかを返す（関数内はローカル優先） */
+    function scopeOf(name) {
+      if (locals && locals.has(name)) return locals;
+      if (env.vars.has(name)) return env.vars;
+      return null;
+    }
+    /** 書き込み先スコープ（関数の中ではローカルに書く） */
+    function writeScope() { return locals || env.vars; }
+
+    function snapshot() {
+      const o = {};
+      for (const [k, v] of env.vars) o[k] = Array.isArray(v) ? v.slice() : v;
+      if (locals) for (const [k, v] of locals) o[k] = Array.isArray(v) ? v.slice() : v;
+      return o;
+    }
+
     // 「式がどの変数・配列要素を読んだか」の記録。
     // アニメーション側で参照元を光らせるために使う。記録したい区間だけ配列にする。
     let reads = null;
 
     function getVar(name, line) {
-      if (!env.vars.has(name)) {
-        throw new DnclError(`変数 ${name} にはまだ値が入っていません`, line);
-      }
-      return env.vars.get(name);
+      const m = scopeOf(name);
+      if (!m) throw new DnclError(`変数 ${name} にはまだ値が入っていません`, line);
+      return m.get(name);
     }
 
     function realIndex(name, i, line) {
-      const arr = env.vars.get(name);
+      const m = scopeOf(name);
+      const arr = m && m.get(name);
       if (!Array.isArray(arr)) throw new DnclError(`${name} は配列ではありません`, line);
       const k = i - env.indexBase;
       if (!Number.isInteger(k) || k < 0 || k >= arr.length) {
@@ -478,20 +520,22 @@
           return (raw !== '' && !Number.isNaN(num)) ? num : raw;
         }
         case 'var': {
-          if (!env.vars.has(n.name)) throw new DnclError(`変数 ${n.name} にはまだ値が入っていません`, line);
-          const v = env.vars.get(n.name);
+          const m = scopeOf(n.name);
+          if (!m) throw new DnclError(`変数 ${n.name} にはまだ値が入っていません`, line);
+          const v = m.get(n.name);
           if (reads && !Array.isArray(v)) reads.push({ name: n.name, index: null });
           return v;
         }
         case 'index': {
-          if (!env.vars.has(n.name)) throw new DnclError(`配列 ${n.name} はまだ作られていません`, line);
+          if (!scopeOf(n.name)) throw new DnclError(`配列 ${n.name} はまだ作られていません`, line);
           const i = ev(n.idx[0], line);
           const k = realIndex(n.name, i, line);
           if (reads) reads.push({ name: n.name, index: i });
-          return env.vars.get(n.name)[k];
+          return scopeOf(n.name).get(n.name)[k];
         }
         case 'call': {
           const args = n.args.map(a => ev(a, line));
+          if (funcs.has(n.name)) return callUserFunc(funcs.get(n.name), args, line);
           const f = BUILTINS[n.name];
           if (!f) throw new DnclError(`関数 ${n.name}() は用意されていません`, line);
           return f(args);
@@ -552,7 +596,7 @@
           case 'group': return '(' + trace(n.e, line) + ')';
           case 'array': return '[' + n.items.map(x => trace(x, line)).join(', ') + ']';
           case 'input': return '【入力】';
-          case 'var': return fmt(env.vars.get(n.name));
+          case 'var': return fmt(getVar(n.name, line));
           case 'index': return fmt(ev(n, line));
           case 'call': return n.name + '(' + n.args.map(a => trace(a, line)).join(', ') + ')';
           case 'neg': return '-' + trace(n.e, line);
@@ -585,16 +629,49 @@
       }
       return Object.assign({
         line, kind, desc,
-        vars: env.snapshot(),
+        vars: snapshot(),
         output: output.slice()
       }, extra || {});
     }
 
-    function* runBlock(stmts) {
-      for (const st of stmts) yield* runStmt(st);
+    /** ユーザー定義関数を呼び出す。中の処理も1ステップずつ記録される */
+    function callUserFunc(def, args, callLine) {
+      if (args.length !== def.params.length) {
+        throw new DnclError(`関数 ${def.name}() の引数は ${def.params.length} 個です（${args.length} 個渡されました）`, callLine);
+      }
+      if (callDepth >= 30) throw new DnclError('関数の呼び出しが深くなりすぎました', callLine);
+      callDepth++;
+      const savedLocals = locals;
+      const savedReads = reads;
+      reads = null;   // 関数の中の読み取りは、呼び出し元の式の reads に混ぜない
+      locals = new Map();
+      def.params.forEach((p, k) => locals.set(p, args[k]));
+      try {
+        emit(step(callLine, 'call',
+          `関数 ${def.name}(${args.map(fmt).join(', ')}) を呼び出します` +
+          (def.params.length ? `（${def.params.map((p, k) => `${p} = ${fmt(args[k])}`).join('、')} として実行）` : ''),
+          {}));
+        let ret = null;
+        try {
+          runBlock(def.body);
+          emit(step(def.line, 'return', `関数 ${def.name} は 戻り値() が無いまま終わりました`, { value: null }));
+        } catch (e) {
+          if (e && e.__return) ret = e.value;
+          else throw e;
+        }
+        return ret;
+      } finally {
+        locals = savedLocals;
+        reads = savedReads;
+        callDepth--;
+      }
     }
 
-    function* runStmt(st) {
+    function runBlock(stmts) {
+      for (const st of stmts) runStmt(st);
+    }
+
+    function runStmt(st) {
       switch (st.type) {
         case 'simple': {
           for (const it of st.items) {
@@ -604,35 +681,35 @@
               const val = cap.value;
               let label, target;
               if (it.target.type === 'var') {
-                env.vars.set(it.target.name, val);
+                writeScope().set(it.target.name, val);
                 label = it.target.name;
                 target = { name: it.target.name, index: null };
               } else {
                 const name = it.target.name;
-                if (!env.vars.has(name)) throw new DnclError(`配列 ${name} はまだ作られていません`, st.line);
+                if (!scopeOf(name)) throw new DnclError(`配列 ${name} はまだ作られていません`, st.line);
                 const icap = capture(() => ev_(it.target.idx[0], st.line));
                 const i = icap.value;
                 cap.reads.push(...icap.reads);
                 const k = realIndex(name, i, st.line);
-                env.vars.get(name)[k] = val;
+                scopeOf(name).get(name)[k] = val;
                 label = `${name}[${fmt(i)}]`;
                 target = { name, index: i };
               }
               const same = (shown === fmt(val));
-              yield step(st.line, 'assign',
+              emit(step(st.line, 'assign',
                 same ? `${label} に ${fmt(val)} を代入しました`
                      : `${label} = ${shown} を計算して、${label} は ${fmt(val)} になりました`,
-                { changed: [it.target.name], value: val, target, reads: cap.reads });
+                { changed: [it.target.name], value: val, target, reads: cap.reads }));
             } else {
               const e = it.expr;
               if (e.type === 'call' && e.name === '表示する') {
                 const cap = capture(() => e.args.map(a => ev_(a, st.line)));
                 const text = cap.value.map(v => fmt(v)).join('');
                 output.push(text);
-                yield step(st.line, 'output', `「${text}」と表示しました`, { text, reads: cap.reads });
+                emit(step(st.line, 'output', `「${text}」と表示しました`, { text, reads: cap.reads }));
               } else {
                 const v = ev_(e, st.line);
-                yield step(st.line, 'expr', `${it.exprSrc} を実行しました`, { value: v });
+                emit(step(st.line, 'expr', `${it.exprSrc} を実行しました`, { value: v }));
               }
             }
           }
@@ -641,11 +718,30 @@
 
         case 'fillall': {
           const v = ev_(st.value, st.line);
-          const arr = env.vars.get(st.name);
+          const m = scopeOf(st.name);
+          const arr = m && m.get(st.name);
           if (!Array.isArray(arr)) throw new DnclError(`${st.name} は配列ではありません`, st.line);
           for (let i = 0; i < arr.length; i++) arr[i] = v;
-          yield step(st.line, 'assign', `${st.name} のすべての要素を ${fmt(v)} にしました`, { changed: [st.name] });
+          emit(step(st.line, 'assign', `${st.name} のすべての要素を ${fmt(v)} にしました`, { changed: [st.name] }));
           return;
+        }
+
+        case 'funcdef': {
+          funcs.set(st.name, st);
+          emit(step(st.line, 'funcdef',
+            `関数 ${st.name}(${st.params.join(', ')}) を定義しました。中の処理は呼び出されたときに実行されます`, {}));
+          return;
+        }
+
+        case 'return': {
+          if (!locals) throw new DnclError('戻り値() は関数の中でしか使えません', st.line);
+          const shown = trace(st.expr, st.line);
+          const cap = capture(() => ev_(st.expr, st.line));
+          const same = (shown === fmt(cap.value));
+          emit(step(st.line, 'return',
+            `戻り値(${st.exprSrc}) ${same ? '' : `= ${shown} `}→ ${fmt(cap.value)} を呼び出し元に返します`,
+            { value: cap.value, reads: cap.reads }));
+          throw { __return: true, value: cap.value };
         }
 
         case 'if': {
@@ -653,14 +749,14 @@
             const shown = trace(br.cond, br.line);
             const cap = capture(() => truthy(ev_(br.cond, br.line)));
             const ok = cap.value;
-            yield step(br.line, 'cond',
+            emit(step(br.line, 'cond',
               `条件「${br.condSrc}」→ ${shown} → ${ok ? '真（成り立つ）。中の処理を実行します' : '偽（成り立たない）。中の処理はとばします'}`,
-              { result: ok, reads: cap.reads });
-            if (ok) { yield* runBlock(br.body); return; }
+              { result: ok, reads: cap.reads }));
+            if (ok) { runBlock(br.body); return; }
           }
           if (st.elseBody) {
-            yield step(st.elseLine, 'cond', 'どの条件にも当てはまらないので、こちらの処理を実行します', { result: true });
-            yield* runBlock(st.elseBody);
+            emit(step(st.elseLine, 'cond', 'どの条件にも当てはまらないので、こちらの処理を実行します', { result: true }));
+            runBlock(st.elseBody);
           }
           return;
         }
@@ -669,25 +765,25 @@
           const from = ev_(st.from, st.line);
           const to = ev_(st.to, st.line);
           const stepV = ev_(st.step, st.line);
-          env.vars.set(st.varName, from);
-          yield step(st.line, 'loop',
+          writeScope().set(st.varName, from);
+          emit(step(st.line, 'loop',
             `${st.varName} に ${fmt(from)} を入れて繰り返しを始めます（${fmt(from)} から ${fmt(to)} まで ${fmt(stepV)} ずつ${st.dir > 0 ? '増やす' : '減らす'}）`,
-            { changed: [st.varName], loopVar: { name: st.varName, value: from } });
+            { changed: [st.varName], loopVar: { name: st.varName, value: from } }));
           let guard = 0;
           while (true) {
-            const cur = env.vars.get(st.varName);
+            const cur = writeScope().get(st.varName);
             const cont = st.dir > 0 ? cur <= to : cur >= to;
             if (!cont) {
-              yield step(st.line, 'loopend',
+              emit(step(st.line, 'loopend',
                 `${st.varName} が ${fmt(cur)} になり、${fmt(to)} を${st.dir > 0 ? '超えた' : '下回った'}ので繰り返しを終わります`,
-                { loopVar: { name: st.varName, value: cur } });
+                { loopVar: { name: st.varName, value: cur } }));
               return;
             }
-            yield step(st.line, 'loopiter', `${st.varName} = ${fmt(cur)} の回を実行します`,
-              { changed: [st.varName], loopVar: { name: st.varName, value: cur } });
-            yield* runBlock(st.body);
-            const nv = env.vars.get(st.varName) + st.dir * stepV;
-            env.vars.set(st.varName, nv);
+            emit(step(st.line, 'loopiter', `${st.varName} = ${fmt(cur)} の回を実行します`,
+              { changed: [st.varName], loopVar: { name: st.varName, value: cur } }));
+            runBlock(st.body);
+            const nv = writeScope().get(st.varName) + st.dir * stepV;
+            writeScope().set(st.varName, nv);
             if (++guard > 100000) throw new DnclError('繰り返しが多すぎます', st.line);
           }
         }
@@ -698,18 +794,18 @@
             const shown = trace(st.cond, st.line);
             const cap = capture(() => truthy(ev_(st.cond, st.line)));
             const ok = cap.value;
-            yield step(st.line, ok ? 'loopiter' : 'loopend',
+            emit(step(st.line, ok ? 'loopiter' : 'loopend',
               `条件「${st.condSrc}」→ ${shown} → ${ok ? '真。もう一度くり返します' : '偽。繰り返しを終わります'}`,
-              { result: ok, reads: cap.reads });
+              { result: ok, reads: cap.reads }));
             if (!ok) return;
-            yield* runBlock(st.body);
+            runBlock(st.body);
             if (++guard > 100000) throw new DnclError('繰り返しが多すぎます', st.line);
           }
         }
       }
     }
 
-    return { env, output, run: () => runBlock(ast) };
+    return { env, output, steps, run: () => runBlock(ast) };
   }
 
   /**
@@ -718,21 +814,21 @@
    */
   function execute(codeLines, opts) {
     opts = opts || {};
-    const steps = [];
+    let steps = [];
     let error = null;
     let output = [];
     try {
       const ast = parseProgram(codeLines);
       const runner = makeRunner(ast, opts);
-      for (const s of runner.run()) {
-        steps.push(s);
-        if (steps.length > (opts.maxSteps || 4000)) break;
-      }
+      steps = runner.steps;   // エラーで中断しても、そこまでのステップは残る
+      runner.run();
       output = runner.output;
     } catch (e) {
       if (e instanceof DnclError) {
         error = e;
         if (steps.length) output = steps[steps.length - 1].output;
+      } else if (e && e.__return) {
+        error = new DnclError('戻り値() は関数の中でしか使えません', null);
       } else {
         error = new DnclError('実行中に問題が起きました: ' + e.message, null);
       }
