@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>共通テスト情報Ⅰ プログラミング演習</title>
-<link rel="stylesheet" href="style.css?v=3">
+<link rel="stylesheet" href="style.css?v=4">
 </head>
 <body>
 
@@ -18,7 +18,11 @@
 <div class="wrap" id="app"></div>
 
 <div class="tray" id="tray" hidden>
-  <div class="lbl">選択肢を指でドラッグして、コードの空欄に入れてください（タップして選んでから空欄をタップしてもOK）</div>
+  <div class="trayhead" id="trayhead">
+    <span class="traytitle">選択肢</span>
+    <span class="traytip" id="traytip">タップして選ぶ → 空欄をタップ（長押しでドラッグ）</span>
+    <button class="traytoggle" id="traytoggle" aria-label="選択肢の開閉">▼</button>
+  </div>
   <div class="chips" id="chips"></div>
 </div>
 

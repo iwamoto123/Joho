@@ -121,8 +121,11 @@
     `;
 
     renderCode(prob);
-    renderChips(prob);
     tray.hidden = false;
+    tray.classList.remove('collapsed');
+    $('#traytoggle').textContent = '▼';
+    renderChips(prob);
+    setTimeout(syncTrayHeight, 0);
 
     $('#hintbtn').onclick = () => {
       const b = $('#hintbox');
@@ -183,44 +186,113 @@
         sl.textContent = v;
       }
     });
+    markAwaiting();
     // 選択肢は何度でも使える（同じものを繰り返し選んでよい）ので、使用済みの表示はしない
   }
 
   /* ---------------- 選択肢 ---------------- */
   function renderChips(prob) {
     chipsEl.innerHTML = (prob.choices || []).map((c, i) =>
-      `<span class="chip" data-text="${esc(c)}">${esc(c)}</span>`).join('');
+      `<span class="chip" data-text="${esc(c)}"><span class="cnum">${i + 1}</span><span class="ctxt">${esc(c)}</span></span>`
+    ).join('');
+    syncTrayHeight();
   }
 
-  /* ---------------- ドラッグ & タップ ---------------- */
+  /** 選択肢トレイの高さを本文の下余白に反映する（選択肢が画面外に隠れないように） */
+  function syncTrayHeight() {
+    const h = tray.hidden ? 0 : Math.ceil(tray.getBoundingClientRect().height);
+    document.documentElement.style.setProperty('--trayh', h + 'px');
+  }
+  window.addEventListener('resize', syncTrayHeight);
+
+  $('#traytoggle').onclick = () => {
+    tray.classList.toggle('collapsed');
+    $('#traytoggle').textContent = tray.classList.contains('collapsed') ? '▲' : '▼';
+    setTimeout(syncTrayHeight, 0);
+  };
+
+  /* ---------------- 選ぶ / ドラッグする ----------------
+     スマホでは
+       ・上下スワイプ  → 選択肢リストのスクロール（触らない）
+       ・タップ        → その選択肢を「選択中」にする → 空欄をタップで入る
+       ・長押し(0.26秒) → つかんでドラッグできる
+     という3通りにする。以前は chip に touch-action:none を当てていたため
+     スワイプがすべてドラッグ扱いになり、リストをスクロールできなかった。
+     ------------------------------------------------------------------ */
   let selected = null;
   let drag = null;
+  let dragArmed = false;
 
+  // ドラッグ中だけブラウザのスクロールを止める
+  document.addEventListener('touchmove', (e) => { if (dragArmed) e.preventDefault(); }, { passive: false });
+
+  function markAwaiting() {
+    document.querySelectorAll('.slot').forEach(s => {
+      s.classList.toggle('awaiting', !!selected);
+    });
+  }
   function clearSelection() {
     selected = null;
     document.querySelectorAll('.chip.selected').forEach(c => c.classList.remove('selected'));
+    markAwaiting();
+  }
+  function selectChoice(text) {
+    selected = text;
+    document.querySelectorAll('.chip').forEach(c => c.classList.toggle('selected', c.dataset.text === text));
+    markAwaiting();
   }
 
-  function startDrag(text, fromSlot, ev) {
-    drag = { text, fromSlot, moved: false, startX: ev.clientX, startY: ev.clientY, ghost: null };
+  function startPress(text, fromSlot, ev, srcEl) {
+    drag = {
+      text, fromSlot, srcEl,
+      armed: false, cancelled: false,
+      startX: ev.clientX, startY: ev.clientY,
+      pointerType: ev.pointerType || 'mouse',
+      ghost: null, timer: null
+    };
+    if (drag.pointerType !== 'mouse') {
+      drag.timer = setTimeout(() => armDrag(drag.startX, drag.startY), 260);
+    }
     document.addEventListener('pointermove', onMove, { passive: false });
     document.addEventListener('pointerup', onUp);
-    document.addEventListener('pointercancel', onUp);
+    document.addEventListener('pointercancel', onCancel);
+  }
+
+  function armDrag(x, y) {
+    if (!drag || drag.cancelled || drag.armed) return;
+    drag.armed = true;
+    dragArmed = true;
+    document.body.classList.add('dragging');
+    if (drag.srcEl) drag.srcEl.classList.add('lifting');
+    const g = document.createElement('div');
+    g.className = 'ghost';
+    g.textContent = drag.text;
+    g.style.left = x + 'px';
+    g.style.top = y + 'px';
+    document.body.appendChild(g);
+    drag.ghost = g;
+    if (navigator.vibrate) { try { navigator.vibrate(12); } catch (e) {} }
   }
 
   function onMove(ev) {
-    if (!drag) return;
+    if (!drag || drag.cancelled) return;
     const dx = ev.clientX - drag.startX, dy = ev.clientY - drag.startY;
-    if (!drag.moved && Math.hypot(dx, dy) < 6) return;
-    ev.preventDefault();
-    if (!drag.moved) {
-      drag.moved = true;
-      const g = document.createElement('div');
-      g.className = 'ghost';
-      g.textContent = drag.text;
-      document.body.appendChild(g);
-      drag.ghost = g;
+    const dist = Math.hypot(dx, dy);
+
+    if (!drag.armed) {
+      if (dist < 8) return;
+      // マウスはすぐドラッグ。指は横方向の動きならドラッグ、縦ならスクロールに譲る
+      if (drag.pointerType === 'mouse' || Math.abs(dx) > Math.abs(dy) * 1.2) {
+        clearTimeout(drag.timer);
+        armDrag(ev.clientX, ev.clientY);
+      } else {
+        clearTimeout(drag.timer);
+        drag.cancelled = true;
+        return;
+      }
     }
+
+    ev.preventDefault();
     drag.ghost.style.left = ev.clientX + 'px';
     drag.ghost.style.top = ev.clientY + 'px';
     document.querySelectorAll('.slot.over').forEach(s => s.classList.remove('over'));
@@ -229,24 +301,36 @@
     if (slot) slot.classList.add('over');
   }
 
-  function onUp(ev) {
+  function teardown() {
     document.removeEventListener('pointermove', onMove);
     document.removeEventListener('pointerup', onUp);
-    document.removeEventListener('pointercancel', onUp);
-    if (!drag) return;
-    const d = drag; drag = null;
+    document.removeEventListener('pointercancel', onCancel);
+    dragArmed = false;
+    document.body.classList.remove('dragging');
+    document.querySelectorAll('.chip.lifting').forEach(c => c.classList.remove('lifting'));
     document.querySelectorAll('.slot.over').forEach(s => s.classList.remove('over'));
-    if (d.ghost) d.ghost.remove();
+    if (drag && drag.timer) clearTimeout(drag.timer);
+    if (drag && drag.ghost) drag.ghost.remove();
+  }
 
-    if (!d.moved) {
+  function onCancel() { teardown(); drag = null; }
+
+  function onUp(ev) {
+    if (!drag) { teardown(); return; }
+    const d = drag;
+    teardown();
+    drag = null;
+    if (d.cancelled) return;
+
+    if (!d.armed) {
       // タップ扱い
-      if (d.fromSlot) { delete State.filled[d.fromSlot]; refreshSlots(); clearJudge(); }
-      else {
+      if (d.fromSlot) {
+        if (selected) { State.filled[d.fromSlot] = selected; clearSelection(); }
+        else delete State.filled[d.fromSlot];
+        refreshSlots(); clearJudge();
+      } else {
         if (selected === d.text) clearSelection();
-        else {
-          clearSelection(); selected = d.text;
-          document.querySelectorAll('.chip').forEach(c => { if (c.dataset.text === d.text) c.classList.add('selected'); });
-        }
+        else selectChoice(d.text);
       }
       return;
     }
@@ -266,7 +350,7 @@
 
   document.addEventListener('pointerdown', (ev) => {
     const chip = ev.target.closest ? ev.target.closest('.chip') : null;
-    if (chip) { startDrag(chip.dataset.text, null, ev); return; }
+    if (chip) { startPress(chip.dataset.text, null, ev, chip); return; }
     const slot = ev.target.closest ? ev.target.closest('.slot') : null;
     if (slot) {
       if (selected) {
@@ -274,7 +358,7 @@
         clearSelection(); refreshSlots(); clearJudge();
         return;
       }
-      if (slot.classList.contains('filled')) { startDrag(State.filled[slot.dataset.blank], slot.dataset.blank, ev); }
+      if (slot.classList.contains('filled')) startPress(State.filled[slot.dataset.blank], slot.dataset.blank, ev, slot);
       return;
     }
   });
@@ -516,7 +600,7 @@
 
   /* ---------------- ルーティング ---------------- */
   function renderHome() {
-    tray.hidden = true;
+    tray.hidden = true; syncTrayHeight();
     $('#setname').textContent = '';
     const sets = window.PROBLEM_SETS || {};
     app.innerHTML = `
@@ -535,7 +619,7 @@
   }
 
   function renderSetIndex(set) {
-    tray.hidden = true;
+    tray.hidden = true; syncTrayHeight();
     $('#setname').textContent = set.title;
     const prog = getProgress(set.id);
     app.innerHTML = `
@@ -595,7 +679,7 @@
       app.innerHTML = `<div class="card"><h2>問題を読み込めませんでした</h2>
         <p class="muted">URLが途中で切れている可能性があります。先生にもう一度URLを送ってもらってください。</p>
         <p class="muted">${esc(e.message)}</p></div>`;
-      tray.hidden = true;
+      tray.hidden = true; syncTrayHeight();
       return;
     }
     renderHome();

@@ -52,7 +52,7 @@ a { color: var(--pri-d); }
 .topbar a:hover { opacity: 1; text-decoration: underline; }
 
 /* ---------- layout ---------- */
-.wrap { max-width: 1280px; margin: 0 auto; padding: 16px 16px 180px; }
+.wrap { max-width: 1280px; margin: 0 auto; padding: 16px 16px calc(var(--trayh, 170px) + 28px); }
 .cols { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, .95fr); gap: 16px; align-items: start; }
 @media (max-width: 980px) { .cols { grid-template-columns: minmax(0, 1fr); } }
 .cols > div { min-width: 0; }
@@ -127,29 +127,66 @@ table.data td:first-child, table.data th:first-child { background: #f8fafc; font
 .slot.over { background: var(--acc); border-color: #fff; color: #fff; }
 .slot.correct { background: #17663f; border: 2px solid #46c185; }
 .slot.wrong { background: #7a2727; border: 2px solid #e07c7c; }
+/* 選択肢を選んでいる間、入れられる空欄を光らせる */
+.slot.awaiting { border-color: var(--acc); animation: slotpulse 1.2s ease-in-out infinite; }
+@keyframes slotpulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(223, 141, 51, .6); }
+  50% { box-shadow: 0 0 0 6px rgba(223, 141, 51, 0); }
+}
 
-/* ---------- tray ---------- */
+/* ---------- 選択肢トレイ ---------- */
 .tray {
   position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
   background: #fff; border-top: 1px solid var(--line);
-  box-shadow: 0 -2px 12px rgba(0,0,0,.06);
-  padding: 10px 14px calc(10px + env(safe-area-inset-bottom));
+  box-shadow: 0 -3px 14px rgba(0,0,0,.10);
+  padding-bottom: env(safe-area-inset-bottom);
 }
-.tray .lbl { font-size: 12px; color: var(--muted); margin-bottom: 6px; }
-.chips { display: flex; flex-wrap: wrap; gap: 8px; max-height: 132px; overflow-y: auto; }
+.trayhead {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px; background: var(--pri-l);
+  border-bottom: 1px solid #cfe0ee;
+}
+.traytitle {
+  font-size: 13px; font-weight: 700; color: var(--pri-d);
+  border: 1.5px solid var(--pri); border-radius: 4px; padding: 1px 9px; background: #fff;
+  flex: 0 0 auto;
+}
+.traytip { font-size: 11.5px; color: var(--muted); flex: 1 1 auto; line-height: 1.4; }
+.traytoggle { flex: 0 0 auto; padding: 4px 11px; font-size: 12px; border-radius: 4px; }
+
+.chips {
+  display: flex; flex-wrap: wrap; gap: 8px;
+  padding: 11px 14px 13px;
+  max-height: 150px; overflow-y: auto;
+  -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
+}
+.tray.collapsed .chips { display: none; }
+
 .chip {
+  display: inline-flex; align-items: center; gap: 8px;
   font-family: var(--mono); font-size: 13.5px;
-  padding: 7px 12px; border-radius: 5px;
-  background: var(--pri-l); border: 1px solid #b4d3ea; color: var(--pri-d);
-  cursor: grab; user-select: none; touch-action: none; white-space: nowrap;
+  padding: 7px 13px 7px 7px; border-radius: 6px;
+  background: #fff; border: 1.5px solid #a9cde8; color: var(--pri-d);
+  cursor: grab; user-select: none; white-space: nowrap;
+  touch-action: pan-y;                 /* 上下スワイプはスクロールに譲る */
+  box-shadow: 0 1px 0 rgba(0,0,0,.05);
 }
-.chip.selected { background: var(--acc); border-color: var(--acc); color: #fff; }
+.chip .cnum {
+  font-family: var(--sans); font-weight: 700; font-size: 12px;
+  color: #fff; background: var(--pri); border-radius: 4px;
+  min-width: 23px; height: 21px; line-height: 21px; text-align: center;
+}
+.chip.selected { background: var(--acc-l); border-color: var(--acc); color: #8a4f08; }
+.chip.selected .cnum { background: var(--acc); }
+.chip.lifting { opacity: .35; }
+body.dragging { user-select: none; }
+
 .ghost {
   position: fixed; z-index: 100; pointer-events: none;
   font-family: var(--mono); font-size: 13.5px;
-  padding: 7px 12px; border-radius: 5px;
-  background: var(--acc); color: #fff; box-shadow: 0 6px 18px rgba(0,0,0,.25);
-  transform: translate(-50%, -50%);
+  padding: 8px 13px; border-radius: 6px;
+  background: var(--acc); color: #fff; box-shadow: 0 8px 22px rgba(0,0,0,.3);
+  transform: translate(-50%, -50%) scale(1.06);
 }
 
 /* ---------- buttons ---------- */
@@ -268,7 +305,7 @@ textarea.code { font-family: var(--mono); font-size: 13.5px; line-height: 1.8; }
   .topbar h1 { font-size: 14px; }
   .topbar .sub { display: none; }
 
-  .wrap { padding: 12px 12px 200px; }
+  .wrap { padding: 12px 12px calc(var(--trayh, 190px) + 20px); }
   .card { padding: 13px; margin-bottom: 11px; }
   .card h2 { font-size: 14.5px; }
   .card h3 { margin: 12px 0 5px; }
@@ -284,11 +321,13 @@ textarea.code { font-family: var(--mono); font-size: 13.5px; line-height: 1.8; }
   .cl { padding: 1px 10px; scroll-margin-top: 64px; scroll-margin-bottom: 58vh; }
   .slot { min-width: 74px; padding: 2px 9px; }
 
-  /* 選択肢トレイ */
-  .tray { padding: 9px 12px calc(9px + env(safe-area-inset-bottom)); }
-  .tray .lbl { font-size: 11.5px; margin-bottom: 5px; }
-  .chips { max-height: 108px; gap: 7px; }
-  .chip { padding: 10px 13px; font-size: 13.5px; }
+  /* 選択肢トレイ：見出しをつけて「選択肢」だと分かるようにし、中身はスクロールできるようにする */
+  .trayhead { padding: 7px 12px; gap: 8px; }
+  .traytitle { font-size: 12.5px; padding: 1px 8px; }
+  .traytip { font-size: 11px; }
+  .chips { padding: 10px 12px 12px; max-height: 32vh; gap: 7px; }
+  .chip { padding: 9px 12px 9px 7px; font-size: 13.5px; }
+  .chip .cnum { min-width: 24px; height: 22px; line-height: 22px; }
 
   button { padding: 10px 16px; }
   .btns { gap: 7px; }
