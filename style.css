@@ -167,10 +167,19 @@ table.data td:first-child, table.data th:first-child { background: #f8fafc; font
   font-family: var(--mono); font-size: 13.5px;
   padding: 7px 13px 7px 7px; border-radius: 6px;
   background: #fff; border: 1.5px solid #a9cde8; color: var(--pri-d);
-  cursor: grab; user-select: none; white-space: nowrap;
+  cursor: grab; white-space: nowrap;
   touch-action: pan-y;                 /* 上下スワイプはスクロールに譲る */
   box-shadow: 0 1px 0 rgba(0,0,0,.05);
+  transition: transform .12s, background .12s;
 }
+/* 長押ししたときに文字選択・コピーメニュー・虫めがねが出ないようにする */
+.chip, .slot, .trayhead, .ghost {
+  -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none; user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+.chip:active { background: var(--pri-l); }
+.chip.pressing { transform: scale(.96); background: var(--pri-l); }
 .chip .cnum {
   font-family: var(--sans); font-weight: 700; font-size: 12px;
   color: #fff; background: var(--pri); border-radius: 4px;
@@ -178,8 +187,11 @@ table.data td:first-child, table.data th:first-child { background: #f8fafc; font
 }
 .chip.selected { background: var(--acc-l); border-color: var(--acc); color: #8a4f08; }
 .chip.selected .cnum { background: var(--acc); }
-.chip.lifting { opacity: .35; }
-body.dragging { user-select: none; }
+.chip.lifting { opacity: .3; transform: none; }
+body.dragging, body.dragging * {
+  -webkit-user-select: none !important; -moz-user-select: none !important; user-select: none !important;
+  -webkit-touch-callout: none;
+}
 
 .ghost {
   position: fixed; z-index: 100; pointer-events: none;

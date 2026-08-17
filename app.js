@@ -226,6 +226,13 @@
   // ドラッグ中だけブラウザのスクロールを止める
   document.addEventListener('touchmove', (e) => { if (dragArmed) e.preventDefault(); }, { passive: false });
 
+  // 長押ししたときに、iPhone の文字選択（虫めがね）やコピーメニューが出ないようにする
+  document.addEventListener('selectstart', (e) => { if (drag) e.preventDefault(); });
+  document.addEventListener('contextmenu', (e) => {
+    const t = e.target.closest ? e.target.closest('.chip, .slot') : null;
+    if (t || drag) e.preventDefault();
+  });
+
   function markAwaiting() {
     document.querySelectorAll('.slot').forEach(s => {
       s.classList.toggle('awaiting', !!selected);
@@ -250,8 +257,9 @@
       pointerType: ev.pointerType || 'mouse',
       ghost: null, timer: null
     };
+    if (srcEl) srcEl.classList.add('pressing');
     if (drag.pointerType !== 'mouse') {
-      drag.timer = setTimeout(() => armDrag(drag.startX, drag.startY), 260);
+      drag.timer = setTimeout(() => armDrag(drag.startX, drag.startY), 200);
     }
     document.addEventListener('pointermove', onMove, { passive: false });
     document.addEventListener('pointerup', onUp);
@@ -263,7 +271,9 @@
     drag.armed = true;
     dragArmed = true;
     document.body.classList.add('dragging');
-    if (drag.srcEl) drag.srcEl.classList.add('lifting');
+    // 押している間にうっかり始まった文字選択を消す
+    try { const s = window.getSelection(); if (s && s.removeAllRanges) s.removeAllRanges(); } catch (e) {}
+    if (drag.srcEl) { drag.srcEl.classList.remove('pressing'); drag.srcEl.classList.add('lifting'); }
     const g = document.createElement('div');
     g.className = 'ghost';
     g.textContent = drag.text;
@@ -307,7 +317,7 @@
     document.removeEventListener('pointercancel', onCancel);
     dragArmed = false;
     document.body.classList.remove('dragging');
-    document.querySelectorAll('.chip.lifting').forEach(c => c.classList.remove('lifting'));
+    document.querySelectorAll('.chip.lifting, .chip.pressing').forEach(c => c.classList.remove('lifting', 'pressing'));
     document.querySelectorAll('.slot.over').forEach(s => s.classList.remove('over'));
     if (drag && drag.timer) clearTimeout(drag.timer);
     if (drag && drag.ghost) drag.ghost.remove();
