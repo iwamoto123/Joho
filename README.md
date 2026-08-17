@@ -25,12 +25,23 @@
 
 ## 公開URL
 
-https://iwamoto123.github.io/Joho/
+https://shiratani-joho.vercel.app
 
-- 生徒用: https://iwamoto123.github.io/Joho/
-- 先生用（問題作成）: https://iwamoto123.github.io/Joho/teacher.html
+- 生徒用: https://shiratani-joho.vercel.app
+- 先生用（問題作成）: https://shiratani-joho.vercel.app/teacher
 
-`main` ブランチに push すると GitHub Pages が自動で更新される（1〜2分かかる）。
+Vercel（チーム `bushido2` / プロジェクト `shiratani-joho`）でホストしている静的サイト。
+
+### 更新のしかた
+
+```bash
+vercel deploy --prod --yes     # このディレクトリで実行すると本番に反映される
+```
+
+GitHub の push では自動更新されない（Vercel の GitHub App が `iwamoto123/Joho` に
+アクセスできていないため）。自動更新したい場合は
+https://github.com/settings/installations → Vercel → Configure で `Joho` を許可し、
+`vercel git connect` を実行する。
 
 ## ローカルで動かす
 
