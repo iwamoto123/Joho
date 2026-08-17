@@ -66,20 +66,30 @@
         '</table></div>';
     }
 
-    // 解き方のイメージ（紙芝居）
-    const conceptHtml = (prob.concept && prob.concept.length) ? `
-          <div class="card" id="conceptcard">
-            <h2>まずは「解き方」を紙芝居で</h2>
-            <div class="kami">
-              <button class="knav" id="kprev" aria-label="前のスライド">←</button>
-              <div class="kstage" id="kstage"></div>
-              <button class="knav" id="knext" aria-label="次のスライド">→</button>
-            </div>
-            <div class="kfoot">
-              <div class="kdots" id="kdots"></div>
-              <span class="kpos" id="kpos"></span>
-            </div>
-          </div>` : '';
+    // 解き方のヒント：concept 紙芝居＋文章ヒントをモーダルで見せる（画面を散らかさない）
+    const hintSlides = (prob.concept || []).slice();
+    if (prob.hint) {
+      hintSlides.push({ t: '答えにつながるヒント', d: '<div class="sl-note">' + esc(prob.hint) + '</div>' });
+    }
+    const kamiHtml = hintSlides.length ? `
+      <div class="kmodal" id="kmodal" hidden>
+        <div class="kmodal-back" id="kmodalback"></div>
+        <div class="kmodal-panel">
+          <div class="kmodal-head">
+            <h3>解き方のヒント</h3>
+            <button class="kclose" id="kclose" aria-label="閉じる">✕</button>
+          </div>
+          <div class="kami">
+            <button class="knav" id="kprev" aria-label="前のスライド">←</button>
+            <div class="kstage" id="kstage"></div>
+            <button class="knav" id="knext" aria-label="次のスライド">→</button>
+          </div>
+          <div class="kfoot">
+            <div class="kdots" id="kdots"></div>
+            <span class="kpos" id="kpos"></span>
+          </div>
+        </div>
+      </div>` : '';
 
     app.innerHTML = `
       ${navHref || ''}
@@ -89,12 +99,10 @@
             <h2>${esc(prob.title)}</h2>
             <p class="q-text">${prob.question}</p>
             ${dataHtml}
-            <div class="btns">
-              <button id="hintbtn">ヒントを見る</button>
-            </div>
-            <div class="hintbox" id="hintbox">${esc(prob.hint || '')}</div>
+            ${hintSlides.length ? `<div class="btns">
+              <button class="hint" id="hintbtn"><span class="hint-ic">?</span>ヒントを見る（解き方の紙芝居）</button>
+            </div>` : ''}
           </div>
-${conceptHtml}
           <div class="card">
             <h2>プログラム（空欄を埋めよう）</h2>
             <div class="codebox" id="code"></div>
@@ -137,6 +145,7 @@ ${conceptHtml}
           </div>
         </div>
       </div>
+      ${kamiHtml}
     `;
 
     renderCode(prob);
@@ -146,11 +155,12 @@ ${conceptHtml}
     renderChips(prob);
     setTimeout(syncTrayHeight, 0);
 
-    $('#hintbtn').onclick = () => {
-      const b = $('#hintbox');
-      b.classList.toggle('show');
-      $('#hintbtn').textContent = b.classList.contains('show') ? 'ヒントを閉じる' : 'ヒントを見る';
-    };
+    if (hintSlides.length) {
+      initKami(hintSlides);
+      $('#hintbtn').onclick = openKami;
+      $('#kclose').onclick = closeKami;
+      $('#kmodalback').onclick = closeKami;
+    }
     $('#answerbtn').onclick = grade;
     $('#clearbtn').onclick = () => { State.filled = {}; refreshSlots(); clearJudge(); };
     $('#fillbtn').onclick = () => {
@@ -169,10 +179,22 @@ ${conceptHtml}
     State.anim.speed = toDelay($('#speed').value);
 
     if (set) $('#pager').innerHTML = pagerHtml(set, prob.id);
-    if (prob.concept && prob.concept.length) initKami(prob.concept);
   }
 
-  /* ---------------- 解き方のイメージ（紙芝居） ---------------- */
+  /* ---------------- 解き方のヒント（紙芝居モーダル） ---------------- */
+  function openKami() {
+    const m = $('#kmodal');
+    if (!m) return;
+    m.hidden = false;
+    document.body.classList.add('kami-open');
+  }
+  function closeKami() {
+    const m = $('#kmodal');
+    document.body.classList.remove('kami-open');
+    if (m) m.hidden = true;
+  }
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeKami(); });
+
   function initKami(slides) {
     let idx = 0;
     const stage = $('#kstage'), dots = $('#kdots');
@@ -844,14 +866,27 @@ ${conceptHtml}
   function renderHome() {
     tray.hidden = true; syncTrayHeight();
     $('#setname').textContent = '';
-    const sets = window.PROBLEM_SETS || {};
+    const sets = Object.values(window.PROBLEM_SETS || {});
     app.innerHTML = `
-      <div class="card">
-        <h2>問題セット</h2>
-        <p class="muted">取り組みたいセットを選んでください。ログインは不要です。</p>
-        <div class="list">
-          ${Object.values(sets).map(s => `<a href="#/s/${s.id}"><b>${esc(s.title)}</b><span class="muted">${s.problems.length}問</span></a>`).join('')}
-        </div>
+      <div class="home-hero">
+        <h2>問題を解いて、動きを見て、納得する。</h2>
+        <p>共通テスト「情報Ⅰ」のプログラム表記を、穴埋め問題と1行ずつのアニメーションで練習できます。ログインは不要です。</p>
+      </div>
+      <div class="setlist">
+        ${sets.map((s, i) => {
+          const prog = getProgress(s.id);
+          const solved = s.problems.filter(p => prog[p.id]).length;
+          const pct = Math.round(solved / s.problems.length * 100);
+          return `<a class="setcard" href="#/s/${s.id}">
+            <span class="setno">${i + 1}</span>
+            <span class="setbody">
+              <b>${esc(s.title)}</b>
+              <span class="setmeta">全${s.problems.length}問${solved ? `・${solved}問クリア` : ''}</span>
+              <span class="setbar"><i style="width:${pct}%"></i></span>
+            </span>
+            <span class="setgo">→</span>
+          </a>`;
+        }).join('')}
       </div>
       <div class="card">
         <h2>先生の方へ</h2>
@@ -864,17 +899,23 @@ ${conceptHtml}
     tray.hidden = true; syncTrayHeight();
     $('#setname').textContent = set.title;
     const prog = getProgress(set.id);
+    const solved = set.problems.filter(p => prog[p.id]).length;
     app.innerHTML = `
       <div class="card">
         <h2>${esc(set.title)}</h2>
-        <p>${set.intro || ''}</p>
+        <p class="q-text">${set.intro || ''}</p>
+        <p class="setmeta" style="margin:10px 0 0">全${set.problems.length}問${solved ? `・${solved}問クリア` : ''}</p>
       </div>
-      <div class="card">
-        <h2>問題</h2>
-        <div class="list">
-          ${set.problems.map(p => `<a href="#/p/${set.id}/${p.id}"><b>${prog[p.id] ? '✅ ' : ''}${esc(p.title)}</b>
-             <span class="muted">${String(p.question).replace(/<[^>]+>/g, '').slice(0, 60)}…</span></a>`).join('')}
-        </div>
+      <div class="setlist">
+        ${set.problems.map((p, i) => `
+          <a class="setcard ${prog[p.id] ? 'done' : ''}" href="#/p/${set.id}/${p.id}">
+            <span class="setno">${prog[p.id] ? '✓' : i + 1}</span>
+            <span class="setbody">
+              <b>${esc(p.title)}</b>
+              <span class="setmeta">${esc(String(p.question).replace(/<[^>]+>/g, '').slice(0, 56))}…</span>
+            </span>
+            <span class="setgo">→</span>
+          </a>`).join('')}
       </div>`;
   }
 
@@ -884,6 +925,7 @@ ${conceptHtml}
     window.scrollTo(0, 0);
     clearSelection();
     closeDock();
+    document.body.classList.remove('kami-open');
 
     try {
       if (parts.length === 0) return renderHome();
